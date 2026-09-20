@@ -34,3 +34,9 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+
+# --- 峰谷罗盘本地数据目录 ---
+.pvdata/
+*.db
+*.db-wal
+*.db-shm

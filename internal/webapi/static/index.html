@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>峰谷罗盘</title>
+<style>
+  :root{--bg:#0f141b;--panel:#161d27;--panel2:#1d2632;--line:#2a3543;--fg:#e6edf3;--mut:#8b9bad;--acc:#5db0ff;--warn:#ffb454;--bad:#ff6b6b;--ok:#5dd39e;--pur:#b18cff}
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:16px;margin:0;letter-spacing:2px}
+  header .sub{color:var(--mut);font-size:12px}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:#1c3a5c;border-color:#2f5f8f}
+  button.danger{border-color:#6e3535;color:#ffb4b4}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .wrap{display:grid;grid-template-columns:300px 1fr 320px;gap:10px;padding:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+  .card h3{margin:0 0 8px;font-size:13px;color:var(--acc)}
+  .muted{color:var(--mut)}
+  .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0}
+  .grow{flex:1}
+  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:4px 7px;font-size:12px}
+  .runitem{padding:6px 8px;border:1px solid var(--line);border-radius:7px;margin:5px 0;cursor:pointer}
+  .runitem.sel{border-color:var(--acc);background:#17283a}
+  .tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);color:var(--mut)}
+  .tag.ref{color:#0f141b;background:var(--acc);border-color:var(--acc)}
+  .tag.frozen{color:#0f141b;background:var(--pur);border-color:var(--pur)}
+  table{border-collapse:collapse;width:100%;font-size:11.5px}
+  th,td{text-align:left;padding:3px 5px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--mut);font-weight:600}
+  tr.pkrow{cursor:pointer}
+  tr.pkrow:hover{background:#17283a}
+  tr.ignored td{opacity:.45;text-decoration:line-through}
+  tr.merged td,tr.split td{opacity:.6}
+  #chartBox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px}
+  svg{display:block;width:100%;height:340px}
+  .legend{display:flex;gap:12px;font-size:11px;color:var(--mut);padding:4px 6px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+  .tabs{display:flex;gap:4px;margin-bottom:8px}
+  .tabs button.on{background:#1c3a5c;border-color:var(--acc)}
+  .sug{border:1px solid var(--line);border-radius:7px;padding:6px;margin:5px 0;font-size:11.5px}
+  .sug.sel{border-color:var(--ok)}
+  .conflict{border-color:#6e3535;background:#2a1d1d;border-radius:7px;padding:7px;margin:6px 0;font-size:11.5px}
+  .toast{position:fixed;right:16px;bottom:16px;max-width:420px;background:#20303f;border:1px solid var(--acc);border-radius:8px;padding:9px 12px;font-size:12px;z-index:20;display:none}
+  .toast.bad{border-color:var(--bad);background:#332020}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .scroll{max-height:300px;overflow:auto}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px}
+  .pill{font-size:10px;padding:0 6px;border-radius:8px;background:var(--panel2)}
+  .errtxt{color:var(--bad)}
+  .oktxt{color:var(--ok)}
+  .warntxt{color:var(--warn)}
+  details summary{cursor:pointer;color:var(--mut)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>峰谷罗盘</h1>
+  <span class="sub" id="headSub">本地色谱保留时间对齐 · 原始曲线/检测参数/峰边界全保留</span>
+  <span class="grow"></span>
+  <button id="btnSeed" class="primary">载入演示数据</button>
+  <button id="btnImport">导入运行…</button>
+  <button id="btnRefresh">刷新</button>
+</header>
+
+<div class="wrap">
+  <div id="leftCol"></div>
+  <div id="midCol"></div>
+  <div id="rightCol"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<dialog id="dlgImport">
+  <div class="card" style="margin:0;min-width:520px">
+    <h3>导入运行</h3>
+    <div class="grid2">
+      <label>名称<input id="imName" value="新运行"></label>
+      <label>样本ID<input id="imSample" value="S-?"></label>
+      <label>仪器ID<input id="imInstr" value="LC-?"></label>
+      <label>柱<input id="imCol" value="COL-?"></label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label class="muted">时间</label>
+      <select id="imMode">
+        <option value="uniform">均匀(起点,步长,点数)</option>
+        <option value="csv">CSV 两列:time,signal</option>
+      </select>
+    </div>
+    <div id="imUniform" class="grid2">
+      <label>起点<input id="imT0" type="number" step="any" value="0"></label>
+      <label>步长<input id="imDt" type="number" step="any" value="0.05"></label>
+      <label>点数<input id="imN" type="number" value="400"></label>
+    </div>
+    <div id="imCsv" style="display:none">
+      <textarea id="imText" rows="8" style="width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px" placeholder="time,signal&#10;0,0.02&#10;0.05,0.03"></textarea>
+    </div>
+    <div class="muted" style="margin:6px 0">合成模式会生成带 4 个高斯峰、可选平台峰与漂移的信号；真实数据请粘贴 CSV。</div>
+    <label class="row"><input type="checkbox" id="imPlateau" checked> 含平台峰</label>
+    <label class="row">漂移斜率 <input id="imDrift" type="number" step="any" value="1.0" style="width:90px"></label>
+    <div class="row" style="justify-content:flex-end">
+      <button id="imCancel">取消</button>
+      <button id="imOk" class="primary">导入</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+'use strict';
+<script>
+'use strict';
+const S = {
+  state:null, series:{}, aligned:{}, residuals:{}, suggestions:{}, history:{}, migrations:{},
+  selRun:null, tab:'overlay', dragging:null, xMode:'run', famSel:[],
+  colors:['#5db0ff','#5dd39e','#ffb454','#b18cff','#ff8fa3','#7ee0d6'],
+};
+const $=id=>document.getElementById(id);
+function toast(msg,bad){const t=$('toast');t.textContent=msg;t.className='toast '+(bad?'bad':'');t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',4200);}
+async function api(method,url,body){
+  const opt={method,headers:{'Content-Type':'application/json'}};
+  if(body!==undefined)opt.body=JSON.stringify(body);
+  const r=await fetch(url,opt);const ct=r.headers.get('content-type')||'';
+  const data=ct.includes('json')?await r.json():await r.text();
+  if(!r.ok){throw Object.assign(new Error(data.error||r.statusText),{data});}
+  return data;
+}
+const fmt=(x,d=3)=>x==null?'-':(Math.round(x*10**d)/10**d).toFixed(d);
+function runColor(id){
+  const runs=(S.state&&S.state.runs)||[];const i=runs.findIndex(r=>r.run.id===id);
+  return S.colors[(i<0?0:i)%S.colors.length];
+}
+function anchorLabel(aid){const a=(S.state.anchors||[]).find(x=>x.id===aid);return a?a.label:aid.slice(0,6);}
+async function refresh(){
+  S.state=await api('GET','/api/state');
+  if(!S.selRun && S.state.runs.length)S.selRun=S.state.runs[0].run.id;
+  render();
+}
+async function loadSeries(rid){
+  if(!rid)return;
+  if(!S.series[rid]){const d=await api('GET',`/api/runs/${rid}/series`);S.series[rid]={times:d.times,signal:d.signal,run:d.run};}
+  if(S.state.alignment){
+    const maps=S.state.maps[rid]||[];
+    if(maps.length){const v=maps[maps.length-1].ver;
+      try{const d=await api('GET',`/api/runs/${rid}/aligned?ver=${v}`);S.aligned[rid]={u:d.u,signal:d.signal,rec:d.aligned};}catch(e){S.aligned[rid]=null;}
+    }
+  }
+}
+
+/* ---------- left column: runs, detection, peak table, edits ---------- */
+function renderLeft(){
+  const el=$('leftCol');
+  const al=S.state.alignment;
+  let h=`<div class="card"><h3>运行 (${S.state.runs.length})</h3>`;
+  if(!S.state.runs.length)h+=`<div class="muted">还没有数据。点右上角“载入演示数据”。</div>`;
+  for(const rs of S.state.runs){
+    const r=rs.run;const ref=al&&al.ref_run_id===r.id;
+    h+=`<div class="runitem ${S.selRun===r.id?'sel':''}" data-run="${r.id}">
+      <b>${r.name}</b> ${ref?'<span class="tag ref">参考</span>':''}
+      <div class="muted mono">${r.meta.sample_id||''} · ${r.meta.instr_id||''} · n=${r.n_points} · dt=${fmt(r.dt,4)}</div>
+      <div class="muted mono">digest ${r.raw_digest.slice(0,10)}…</div>
+    </div>`;
+  }
+  h+=`</div>`;
+  const rs=S.state.runs.find(x=>x.run.id===S.selRun);
+  if(rs){
+    h+=`<div class="card"><h3>检测参数</h3>
+      <div class="grid2">
+        <label>平滑窗<input id="dpSmooth" type="number" value="${rs.det_params?rs.det_params.smooth_window:5}"></label>
+        <label>最小显著性<input id="dpProm" type="number" step="any" value="${rs.det_params?rs.det_params.min_prominence:0.15}"></label>
+        <label>最小宽度(点)<input id="dpWidth" type="number" value="${rs.det_params?rs.det_params.min_width_samples:3}"></label>
+        <label>平台峰<select id="dpPlat"><option value="mid" ${rs.det_params&&rs.det_params.plateau_mode==='mid'?'selected':''}>中点</option><option value="first" ${rs.det_params&&rs.det_params.plateau_mode==='first'?'selected':''}>起点</option></select></label>
+      </div>
+      <div class="row"><button class="primary" id="btnDetect">${rs.det_ver?'重新检测 v'+(rs.det_ver+1):'检测候选峰'}</button>
+      <span class="muted">检测v${rs.det_ver||0} · 编辑${rs.edit_count}版</span></div>
+      <div id="migBox"></div>
+      </div>`;
+    h+=`<div class="card"><h3>峰（身份稳定，非数组下标）</h3><div class="scroll"><table>
+      <thead><tr><th>#</th><th>t</th><th>高</th><th>面积</th><th>状态</th><th>形状</th><th></th></tr></thead><tbody id="pkBody"></tbody></table></div>
+      <div class="row" style="margin-top:6px">
+        <button id="btnMerge">合并所选</button><button id="btnIgnore">忽略</button><button id="btnRestore">恢复</button>
+      </div></div>`;
+    h+=`<div class="card"><h3>可撤销版本</h3><div id="histBox" class="scroll"></div></div>`;
+  }
+  el.innerHTML=h;
+  el.querySelectorAll('.runitem').forEach(n=>n.onclick=()=>{S.selRun=n.dataset.run;render();});
+  if(rs){
+    $('btnDetect').onclick=async()=>{
+      const p={smooth_window:+$('dpSmooth').value,min_prominence:+$('dpProm').value,min_width_samples:+$('dpWidth').value,plateau_mode:$('dpPlat').value};
+      const d=await api('POST',`/api/runs/${S.selRun}/detect`,p);
+      const migs=d.migrations||[];
+      toast(`检测完成 v${d.detection.ver}，候选 ${d.detection.peaks.length} 个`+
+        (migs.length?`；身份迁移 ${migs.length} 条（same ${migs.filter(m=>m.rel==='same').length}/moved ${migs.filter(m=>m.rel==='moved').length}/split ${migs.filter(m=>m.rel==='split').length}/merged ${migs.filter(m=>m.rel==='merged').length}/新增 ${migs.filter(m=>m.rel==='inserted').length}/删除 ${migs.filter(m=>m.rel==='deleted').length}）`:''));
+      await refresh();
+    };
+    renderPeakTable(rs);
+    renderHistory();
+  }
+}
+
+let chosenPeaks=new Set();
+function renderPeakTable(rs){
+  const body=$('pkBody');let h='';
+  rs.items.forEach((p,i)=>{
+    const marks=[p.shape.plateau?'平台':'',p.shape.tied?'并列':'',p.shape.apex_at==='merged'?'合并':p.shape.apex_at==='split'?'拆分':''].filter(Boolean).join('/');
+    h+=`<tr class="pkrow ${p.status}" data-pid="${p.peak_id}">
+      <td>${i}</td><td>${fmt(p.apex_t)}</td><td>${fmt(p.height)}</td><td>${fmt(p.area)}</td>
+      <td><span class="pill">${p.status}</span></td><td class="muted">${marks||'-'}</td>
+      <td>${p.group_id?'<span class="tag">'+p.group_id.slice(0,5)+'</span>':''}</td></tr>`;
+  });
+  body.innerHTML=h;
+  body.querySelectorAll('tr').forEach(tr=>tr.onclick=()=>{
+    const pid=tr.dataset.pid;
+    if(chosenPeaks.has(pid))chosenPeaks.delete(pid);else chosenPeaks.add(pid);
+    tr.style.outline=chosenPeaks.has(pid)?'1px solid var(--acc)':'';
+    drawChart();
+  });
+  const active=id=>{const p=rs.items.find(x=>x.peak_id===id);return p&&p.status==='active';};
+  $('btnMerge').onclick=async()=>{
+    if(chosenPeaks.size<2)return toast('至少选两个 active 峰',true);
+    if([...chosenPeaks].some(id=>!active(id)))return toast('只能合并 active 峰',true);
+    await api('POST',`/api/runs/${S.selRun}/edits`,{op:'merge',peak_ids:[...chosenPeaks]});
+    chosenPeaks.clear();toast('已合并（新版本，可撤销）');await refresh();
+  };
+  $('btnIgnore').onclick=async()=>{
+    if(!chosenPeaks.size)return;
+    await api('POST',`/api/runs/${S.selRun}/edits`,{op:'ignore',peak_ids:[...chosenPeaks]});
+    chosenPeaks.clear();toast('已忽略');await refresh();
+  };
+  $('btnRestore').onclick=async()=>{
+    const ids=[...chosenPeaks];if(!ids.length)return;
+    await api('POST',`/api/runs/${S.selRun}/edits`,{op:'restore',peak_ids:ids});
+    chosenPeaks.clear();toast('已恢复');await refresh();
+  };
+}
+
+function renderHistory(){
+  const box=$('histBox');
+  api('GET',`/api/runs/${S.selRun}/history`).then(d=>{
+    if(!d.versions.length){box.innerHTML='<div class="muted">尚无人工编辑</div>';return;}
+    box.innerHTML=d.versions.map(v=>{
+      const e=v.event;
+      const txt=e.op==='undo'?`撤销 → v${v.undone_of_ver}`:`${e.op} ${(e.peak_ids||[]).map(x=>x.slice(0,5)).join(',')}`;
+      return `<div class="row"><span class="mono">v${v.ver}</span><span class="grow">${txt}</span>
+      <button data-undo="${v.ver}">撤销到此版本前</button></div>`;
+    }).join('');
+    box.querySelectorAll('button[data-undo]').forEach(b=>b.onclick=async()=>{
+      await api('POST',`/api/runs/${S.selRun}/undo`,{ver:+b.dataset.undo});toast('已追加撤销版本');await refresh();
+    });
+  }).catch(()=>box.innerHTML='<div class="muted">无</div>');
+}
+/* ---------- middle column: charts, anchors, residuals ---------- */
+function renderMid(){
+  const el=$('midCol');
+  const al=S.state.alignment;
+  let h=`<div id="chartBox">
+    <div class="tabs">
+      <button data-tab="overlay" class="${S.tab==='overlay'?'on':''}">原始/对齐叠加</button>
+      <button data-tab="map" class="${S.tab==='map'?'on':''}">时间映射</button>
+      <button data-tab="resid" class="${S.tab==='resid'?'on':''}">局部残差</button>
+      <button data-tab="families" class="${S.tab==='families'?'on':''}">峰族</button>
+      <button data-tab="versions" class="${S.tab==='versions'?'on':''}">版本比较</button>
+    </div>
+    <div class="row">
+      <label class="muted">横轴</label>
+      <select id="xMode">
+        <option value="run" ${S.xMode==='run'?'selected':''}>运行原始时间</option>
+        <option value="ref" ${S.xMode==='ref'?'selected':''}>参考时间(对齐后)</option>
+      </select>
+      <span class="grow"></span>
+      <div id="alignBtns" class="row"></div>
+    </div>
+    <svg id="chart" viewBox="0 0 900 340" preserveAspectRatio="none"></svg>
+    <div class="legend" id="legend"></div>
+    </div>`;
+  if(al){
+    h+=`<div class="card"><h3>跨运行锚点</h3><div id="anchorPanel"></div>
+      <div class="row"><button class="primary" id="btnBuild">建立单调映射</button>
+      <button id="btnFreeze">冻结映射</button>
+      <span class="muted">plan rev ${al.plan_rev} · draft rev ${al.draft_rev} · map v${al.map_ver}${al.locked?' · <span class="tag frozen">已冻结</span>':''}</span></div>
+      <div id="conflictBox"></div></div>`;
+  }else if(S.state.runs.length){
+    const ref=S.state.runs[0];
+    h+=`<div class="card"><h3>对齐</h3>
+      <div class="muted">选择参考运行并建立锚点工作区。</div>
+      <div class="row"><select id="refSel"></select><button class="primary" id="btnEnsure">建立对齐工作区</button></div></div>`;
+  }
+  el.innerHTML=h;
+  el.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;render();});
+  $('xMode').onchange=e=>{S.xMode=e.target.value;drawChart();};
+  if(!al && S.state.runs.length){
+    $('refSel').innerHTML=S.state.runs.map(r=>`<option value="${r.run.id}">${r.run.name}</option>`).join('');
+    $('btnEnsure').onclick=async()=>{await api('POST','/api/alignment',{ref_run_id:$('refSel').value,name:'批次对齐'});toast('对齐工作区已建立');await refresh();};
+  }
+  if(al){renderAnchorPanel();renderAlignButtons();renderConflicts();$('btnBuild').onclick=onBuild;
+    $('btnFreeze').disabled=!!al.locked;
+    $('btnFreeze').onclick=async()=>{await api('POST','/api/alignment/freeze',{});toast('映射已冻结（不可变）');await refresh();};
+  }
+  drawChart();
+}
+
+function renderAlignButtons(){
+  const box=$('alignBtns');
+  const al=S.state.alignment;if(!al)return;
+  let h='';
+  for(const rs of S.state.runs){
+    if(rs.run.id===al.ref_run_id)continue;
+    const maps=S.state.maps[rs.run.id]||[];
+    h+=`<button data-derive="${rs.run.id}">${rs.run.name} 派生对齐${maps.length?' v'+maps[maps.length-1].ver:''}</button>`;
+  }
+  box.innerHTML=h;
+  box.querySelectorAll('button').forEach(b=>b.onclick=async()=>{
+    await api('POST',`/api/runs/${b.dataset.derive}/derive`,{});toast('已生成可追溯派生曲线');
+    delete S.aligned[b.dataset.derive];await loadSeries(b.dataset.derive);drawChart();
+  });
+}
+
+function onBuild(){
+  api('POST','/api/alignment/build',{}).then(async d=>{
+    toast('映射已保存；可点“派生对齐”生成曲线');
+    // automatically derive all mapped runs
+    const al=S.state.alignment;
+    for(const rs of S.state.runs){
+      if(rs.run.id===al.ref_run_id)continue;
+      if(d.maps[rs.run.id]){try{await api('POST',`/api/runs/${rs.run.id}/derive`,{});}catch(e){}}
+    }
+    S.aligned={};await refresh();
+  }).catch(async e=>{
+    toast('保存被拒绝：存在交叉锚点最小拒绝集',true);
+    if(e.data&&e.data.plan)S.state.plan=e.data.plan;
+    renderConflicts();
+  });
+}
+
+function renderConflicts(){
+  const box=$('conflictBox');const plan=S.state.plan;
+  if(!plan){box.innerHTML='';return;}
+  let h='';
+  if((plan.conflicts||[]).length){
+    h+=`<div class="conflict"><b class="errtxt">检测到 ${plan.conflicts.length} 个交叉/逆序</b><div class="muted">不会用全局排序掩盖；保存映射前必须处理：</div>`;
+    for(const c of plan.conflicts.slice(0,8))h+=`<div class="mono">${runName(c.run_id)}: ${anchorLabel(c.a)} → ${anchorLabel(c.b)}（t ${fmt(c.t_a)} 与 ${fmt(c.t_b)}）</div>`;
+    h+=`</div>`;
+  }
+  for(const rs of (plan.reject_set||[])){
+    h+=`<div class="conflict"><b class="warntxt">最小拒绝集 · ${runName(rs.run_id)}（${rs.size} 个）</b>
+      <div class="muted">${rs.description}</div>
+      <div class="row">${rs.anchor_ids.map(a=>`<button data-rej="${a}" data-run="${rs.run_id}" class="danger">删除 ${anchorLabel(a)}</button>`).join('')}</div></div>`;
+  }
+  if(!(plan.conflicts||[]).length&&!(plan.reject_set||[]).length&&(plan.anchor_ids||[]).length){
+    h=`<div class="oktxt">✓ 全部参与运行单调，可建立映射</div>`;
+  }
+  box.innerHTML=h;
+  box.querySelectorAll('button[data-rej]').forEach(b=>b.onclick=async()=>{
+    try{await api('DELETE',`/api/alignment/anchors/${b.dataset.rej}`,{expect_rev:S.state.alignment.draft_rev});toast('已按最小拒绝集移除锚点');await refresh();}
+    catch(e){toast(e.message,true);}
+  });
+}
+
+function runName(id){const r=S.state.runs.find(x=>x.run.id===id);return r?r.run.name:id.slice(0,6);}
+
+function renderAnchorPanel(){
+  const box=$('anchorPanel');const al=S.state.alignment;
+  const anchors=S.state.anchors||[],points=S.state.points||[];
+  const otherRuns=S.state.runs.filter(r=>r.run.id!==al.ref_run_id);
+  let h=`<table><thead><tr><th>锚点</th><th>参考t</th>${otherRuns.map(r=>`<th>${r.run.name}</th>`).join('')}<th></tr></thead><tbody>`;
+  for(const a of anchors){
+    h+=`<tr><td>${a.label} ${a.auto?'<span class="tag">建议</span>':''}</td><td class="mono">${fmt(a.ref_t)}</td>`;
+    for(const r of otherRuns){
+      const p=points.find(x=>x.anchor_id===a.id&&x.run_id===r.run.id);
+      h+=`<td>${p?`<span class="dot" style="background:${runColor(r.run.id)}"></span>${fmt(p.t)} ${p.manual?'✋':''}
+        <button data-clear="${a.id}|${r.run.id}" title="移除该运行参与">×</button>`:'<span class="muted">缺失</span>'}</td>`;
+    }
+    h+=`<td>${al.locked?'':'<button data-del="'+a.id+'" class="danger">删</button>'}</td></tr>`;
+  }
+  h+=`</tbody></table><div id="sugBox"></div>`;
+  if(!al.locked)h+=`<div class="row" style="margin-top:6px"><select id="anchorRefPk"></select><button class="primary" id="btnAddAnchor">从参考峰新建锚点</button></div>`;
+  box.innerHTML=h;
+  const rs=S.state.runs.find(x=>x.run.id===al.ref_run_id);
+  if(rs&&$('anchorRefPk'))$('anchorRefPk').innerHTML=rs.items.filter(p=>p.status==='active').map(p=>`<option value="${p.peak_id}">峰 ${fmt(p.apex_t)} (${p.peak_id.slice(0,6)})</option>`).join('');
+  if($('btnAddAnchor'))$('btnAddAnchor').onclick=async()=>{
+    const refPk=$('anchorRefPk').value;
+    const pts=[];
+    for(const r of otherRuns){
+      const rrs=S.state.runs.find(x=>x.run.id===r.run.id);
+      const pick=prompt(`为 ${r.run.name} 选择参与峰 id（留空=缺失；可用峰: ${rrs.items.filter(p=>p.status==='active').map(p=>p.peak_id.slice(0,6)+'@'+fmt(p.apex_t)).join(', ')}）`,'');
+      if(pick){
+        const full=rrs.items.map(p=>p.peak_id).find(id=>id.startsWith(pick.trim()));
+        if(full)pts.push({run_id:r.run.id,peak_id:full,manual:true});
+      }
+    }
+    try{await api('POST','/api/alignment/anchors',{ref_peak_id:refPk,points:pts,expect_rev:al.draft_rev});toast('锚点已建');await refresh();}
+    catch(e){toast(e.message,true);}
+  };
+  box.querySelectorAll('button[data-del]').forEach(b=>b.onclick=async()=>{
+    try{await api('DELETE',`/api/alignment/anchors/${b.dataset.del}`,{expect_rev:al.draft_rev});await refresh();}catch(e){toast(e.message,true);}
+  });
+  box.querySelectorAll('button[data-clear]').forEach(b=>b.onclick=async()=>{
+    const [aid,rid]=b.dataset.clear.split('|');
+    try{await api('POST',`/api/alignment/anchors/${aid}/points`,{run_id:rid,peak_id:'',expect_rev:al.draft_rev});toast('已移除该运行参与（部分缺失）');await refresh();}catch(e){toast(e.message,true);}
+  });
+  renderSuggestions();
+}
+
+async function renderSuggestions(){
+  const box=$('sugBox');if(!box)return;
+  const al=S.state.alignment;
+  const other=S.state.runs.filter(r=>r.run.id!==al.ref_run_id);
+  let h='<details><summary>自动建议候选（形状/面积/邻峰说明）</summary>';
+  for(const r of other){
+    let sugs=S.suggestions[r.run.id];
+    if(!sugs){
+      try{sugs=(await api('GET',`/api/alignment/suggest/${r.run.id}`)).suggestions;S.suggestions[r.run.id]=sugs;}catch(e){continue;}
+    }
+    h+=`<div class="muted" style="margin-top:6px">${r.run.name}</div>`;
+    const byRun={};for(const s of sugs)(byRun[s.run_peak_id]=byRun[s.run_peak_id]||[]).push(s);
+    for(const rid in byRun){
+      for(const s of byRun[rid]){
+        h+=`<div class="sug ${s.selected?'sel':''}">
+          <b>run峰 ${fmt(s.run_t)} ↔ 参考峰 ${fmt(s.ref_t)}</b> <span class="tag">score ${fmt(s.score,2)}</span> ${s.selected?'<span class="oktxt">单调贪心选中</span>':''}
+          <div class="muted">形状:${s.shape_note} ｜ 面积:${s.area_note}</div>
+          <div class="muted">邻峰:${s.neighbor_note}</div>
+          <button data-apply="${r.run.id}|${s.run_peak_id}|${s.ref_peak_id}">采用此候选</button>
+        </div>`;
+      }
+    }
+  }
+  h+='</details>';
+  box.innerHTML=h;
+  box.querySelectorAll('button[data-apply]').forEach(b=>b.onclick=async()=>{
+    const [rid,runPk,refPk]=b.dataset.apply.split('|');
+    try{
+      // create anchor on ref peak if absent
+      let a=(S.state.anchors||[]).find(x=>x.ref_peak_id===refPk);
+      if(!a){const d=await api('POST','/api/alignment/anchors',{ref_peak_id:refPk,points:[{run_id:rid,peak_id:runPk,manual:false}],auto:true,expect_rev:S.state.alignment.draft_rev});a=d.anchor;}
+      else await api('POST',`/api/alignment/anchors/${a.id}/points`,{run_id:rid,peak_id:runPk,expect_rev:S.state.alignment.draft_rev});
+      toast('已采用建议候选');await refresh();
+    }catch(e){toast(e.message,true);}
+  });
+}
+/* ---------- SVG drawing & anchor dragging ---------- */
+const M={l:52,r:16,t:14,b:26},W=900,H=340,PW=W-M.l-M.r,PH=H-M.t-M.b;
+function xScale(min,max){return x=>M.l+(x-min)/(max-min||1)*PW;}
+function yScale(min,max){return y=>M.t+PH-(y-min)/(max-min||1)*PH;}
+function bounds(list,key){let lo=Infinity,hi=-Infinity;for(const v of list){const a=v[0],b=v[1];if(a<lo)lo=a;if(a>hi)hi=a;void b;void key;}return[lo,hi];}
+
+async function drawChart(){
+  const svg=$('chart');if(!svg)return;
+  // ensure series loaded
+  await Promise.all(S.state.runs.map(r=>loadSeries(r.run.id)));
+  const tab=S.tab;
+  if(tab==='map')return drawMapChart(svg);
+  if(tab==='resid')return drawResidualsTab();
+  if(tab==='families')return drawFamilies(svg);
+  if(tab==='versions')return drawVersions(svg);
+  drawOverlay(svg);
+}
+
+function allCurves(){
+  const al=S.state.alignment;const out=[];
+  for(const rs of S.state.runs){
+    const r=rs.run;
+    if(S.xMode==='ref'&&al&&S.aligned[r.id]&&r.id!==al.ref_run_id){
+      const a=S.aligned[r.id];out.push({id:r.id,name:r.name,x:a.u,y:a.signal,aligned:true});
+    }else if(S.series[r.id]){
+      const s=S.series[r.id];out.push({id:r.id,name:r.name,x:s.times,y:s.signal,aligned:false});
+    }
+  }
+  return out;
+}
+
+function drawOverlay(svg){
+  const curves=allCurves();
+  let xmin=Infinity,xmax=-Infinity,ymax=0;
+  for(const c of curves){for(let i=0;i<c.x.length;i++){if(c.x[i]<xmin)xmin=c.x[i];if(c.x[i]>xmax)xmax=c.x[i];if(c.y[i]>ymax)ymax=c.y[i];}}
+  if(!curves.length){svg.innerHTML='';return;}
+  const xs=xScale(xmin,xmax),ys=yScale(0,ymax*1.08);
+  let h=gridSVG(xmin,xmax,0,ymax*1.08,xs,ys,S.xMode==='ref'?'参考时间 t*':'运行时间 t','信号');
+  // stacked offset for readability
+  curves.forEach((c,ci)=>{
+    const off=ci*ymax*0.0;
+    let d='';
+    for(let i=0;i<c.x.length;i++){d+=`${i?'L':'M'}${xs(c.x[i]).toFixed(2)},${ys(c.y[i]+off).toFixed(2)}`;}
+    h+=`<path d="${d}" fill="none" stroke="${runColor(c.id)}" stroke-width="1.4" opacity="0.85"/>`;
+    // peaks
+    const rs=S.state.runs.find(r=>r.run.id===c.id);
+    if(rs){
+      for(const p of rs.items){
+        if(p.status==='ignored')continue;
+        const t=(S.xMode==='ref'&&c.aligned)?apexU(c.id,p.apex_t):p.apex_t;
+        const col=p.status==='active'?runColor(c.id):'#8b9bad';
+        h+=`<circle cx="${xs(t)}" cy="${ys(p.height+off)}" r="3.2" fill="${col}" stroke="#0f141b" stroke-width="0.7">
+          <title>${c.name} @${fmt(t)} h=${fmt(p.height)} area=${fmt(p.area)} ${p.shape.plateau?'[平台]':''}${p.shape.tied?'[并列]':''} id=${p.peak_id.slice(0,8)}</title></circle>`;
+        if(p.shape.plateau&&p.shape.plat_from_i>=0&&S.xMode==='run'){
+          const s=S.series[c.id];
+          h+=`<line x1="${xs(s.times[p.shape.plat_from_i])}" x2="${xs(s.times[p.shape.plat_to_i])}" y1="${ys(p.height+off)}" y2="${ys(p.height+off)}" stroke="${col}" stroke-width="2.4" opacity="0.7"/>`;
+        }
+      }
+    }
+  });
+  // anchors: diamonds for selected run; draggable
+  const al=S.state.alignment;
+  if(al&&S.selRun&&S.selRun!==al.ref_run_id){
+    for(const a of S.state.anchors||[]){
+      const pt=(S.state.points||[]).find(p=>p.anchor_id===a.id&&p.run_id===S.selRun);
+      if(!pt)continue;
+      const x=S.xMode==='ref'?a.ref_t:pt.t;
+      h+=`<g class="anchor" data-aid="${a.id}" style="cursor:${al.locked?'default':'grab'}">
+        <polygon points="${xs(x)-5},${M.t+6} ${xs(x)},${M.t+1} ${xs(x)+5},${M.t+6} ${xs(x)},${M.t+11}" fill="#fff" stroke="#0f1414"/>
+        <text x="${xs(x)}" y="${M.t-2}" font-size="9" fill="#e6edf3" text-anchor="middle">${a.label}</text></g>`;
+    }
+  }
+  svg.innerHTML=h;
+  // legend
+  $('legend').innerHTML=curves.map(c=>`<span><i style="background:${runColor(c.id)}"></i>${c.name}${c.aligned?' (对齐)':''}</span>`).join('')
+    +` <span class="muted">◇ 锚点（在运行时间视图可拖动切换峰）</span>`;
+  // drag
+  if(al&&!al.locked){
+    let drag=null;
+    svg.querySelectorAll('g.anchor').forEach(g=>{
+      g.addEventListener('mousedown',e=>{drag={aid:g.dataset.aid,g,startX:e.clientX};e.preventDefault();});
+    });
+    window.onmousemove=e=>{if(drag)drag.g.style.opacity=0.7;};
+    window.onmouseup=async e=>{
+      if(!drag)return;
+      if(Math.abs(e.clientX-drag.startX)<4){drag=null;return;}
+      const rect=svg.getBoundingClientRect();
+      const sx=M.l+(e.clientX-rect.left)/rect.width*PW;
+      const ux=xmin+(sx-M.l)/PW*(xmax-xmin);
+      const rs=S.state.runs.find(r=>r.run.id===S.selRun);
+      // choose nearest active peak in RUN time (anchor reassignment, not free time)
+      let best=null,bd=1e9;
+      for(const p of rs.items){if(p.status!=='active')continue;const d=Math.abs(p.apex_t-ux);if(d<bd){bd=d;best=p;}}
+      if(best){
+        try{await api('POST',`/api/alignment/anchors/${drag.aid}/points`,{run_id:S.selRun,peak_id:best.peak_id,expect_rev:al.draft_rev});toast(`锚点拖到峰 ${fmt(best.apex_t)}，仅相邻区段需重算`);S.suggestions={};await refresh();}
+        catch(err){toast(err.message,true);await refresh();}
+      }
+      drag=null;
+    };
+  }
+}
+
+function apexU(runID,t){
+  const a=S.aligned[runID];if(!a)return t;
+  // piecewise search
+  const u=a.u,sig=a.signal;void sig;
+  const s=S.series[runID];const times=s.times;
+  // find nearest time index
+  let lo=0,hi=times.length-1;
+  while(lo<hi){const m=(lo+hi)>>1;if(times[m]<t)lo=m+1;else hi=m;}
+  return u[Math.min(lo,u.length-1)];
+}
+
+function gridSVG(xmin,xmax,ymin,ymax,xs,ys,xlab,ylab){
+  let h='';
+  for(let i=0;i<=10;i++){
+    const xv=xmin+(xmax-xmin)*i/10,x=xs(xv);
+    h+=`<line x1="${x}" x2="${x}" y1="${M.t}" y2="${H-M.b}" stroke="#222c39" stroke-width="0.5"/>
+        <text x="${x}" y="${H-10}" font-size="9" fill="#8b9bad" text-anchor="middle">${fmt(xv,2)}</text>`;
+  }
+  for(let i=0;i<=5;i++){
+    const yv=ymin+(ymax-ymin)*i/5,y=ys(yv);
+    h+=`<line x1="${M.l}" x2="${W-M.r}" y1="${y}" y2="${y}" stroke="#222c39" stroke-width="0.5"/>
+        <text x="${M.l-5}" y="${y+3}" font-size="9" fill="#8b9bad" text-anchor="end">${fmt(yv,2)}</text>`;
+  }
+  h+=`<line x1="${M.l}" x2="${M.l}" y1="${M.t}" y2="${H-M.b}" stroke="#46566a"/>
+      <line x1="${M.l}" x2="${W-M.r}" y1="${H-M.b}" y2="${H-M.b}" stroke="#46566a"/>
+      <text x="${W/2}" y="${H-0}" font-size="10" fill="#8b9bad" text-anchor="middle">${xlab}</text>
+      <text transform="translate(12,${H/2}) rotate(-90)" font-size="10" fill="#8b9bad" text-anchor="middle">${ylab}</text>`;
+  return h;
+}
+/* ---------- map / residual / families / versions tabs ---------- */
+async function drawMapChart(svg){
+  const al0=S.state.alignment;
+  const runID=S.selRun;if(runID===al0.ref_run_id){svg.innerHTML=`<text x="${W/2}" y="${H/2}" fill="#8b9bad" text-anchor="middle">参考运行的映射为恒等线</text>`;return;}
+  const maps=S.state.maps[runID]||[];if(!maps.length){svg.innerHTML=`<text x="${W/2}" y="${H/2}" fill="#8b9bad" text-anchor="middle">该运行尚无映射版本</text>`;return;}
+  const m=maps[maps.length-1];
+  let xmin=Infinity,xmax=-Infinity,umin=Infinity,umax=-Infinity;
+  for(const s of m.segments){xmin=Math.min(xmin,s.x0);xmax=Math.max(xmax,s.x1);umin=Math.min(umin,s.u0);umax=Math.max(umax,s.u1);}
+  const xs=xScale(xmin,xmax),us=xScale(umin,umax);
+  let h='';
+  for(let i=0;i<=10;i++){const xv=xmin+(xmax-xmin)*i/10;h+=`<line x1="${xs(xv)}" y1="${M.t}" x2="${xs(xv)}" y2="${H-M.b}" stroke="#222c39"/><text x="${xs(xv)}" y="${H-10}" font-size="9" fill="#8b9bad" text-anchor="middle">${fmt(xv,2)}</text>`;}
+  for(let i=0;i<=10;i++){const uv=umin+(umax-umin)*i/10;h+=`<text x="${M.l-5}" y="${us(uv)+3}" font-size="9" fill="#8b9bad" text-anchor="end">${fmt(uv,2)}</text>`;}
+  h+=`<line x1="${M.l}" x2="${W-M.r}" y1="${us(umin)}" y2="${us(umax)}" stroke="#33414f" stroke-dasharray="4 3"/>`; // identity
+  h+=`<line x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${H-M.b}" stroke="#46566a"/><line x1="${M.l}" y1="${H-M.b}" x2="${W-M.r}" y2="${H-M.b}" stroke="#46566a"/>`;
+  for(const s of m.segments){
+    const ext=s.anchor_l===''||s.anchor_r==='';
+    const col=s.locked?'#5dd39e':ext?'#8b9bad':'#5db0ff';
+    h+=`<line x1="${xs(s.x0)}" y1="${us(s.u0)}" x2="${xs(s.x1)}" y2="${us(s.u1)}" stroke="${col}" stroke-width="${s.locked?3:2}">
+      <title>区段${s.idx} ${anchorLabel(s.anchor_l)||'∘'}→${anchorLabel(s.anchor_r)||'∘'} slope=${fmt(s.slope,3)} ${s.locked?'[锁定]':''}${ext?'[外延 slope=1]':''}</title></line>`;
+    if(s.anchor_l){h+=`<circle cx="${xs(s.x0)}" cy="${us(s.u0)}" r="3" fill="#fff"/>`;}
+  }
+  h+=`<text x="${W-120}" y="20" font-size="10" fill="#8b9bad">— 恒等（无漂移）</text>
+      <text x="${W-120}" y="34" font-size="10" fill="#5db0ff">— 映射分段</text>
+      <text x="${W-120}" y="48" font-size="10" fill="#5dd39e">— 锁定区段（逐点一致）</text>`;
+  svg.innerHTML=h;
+  $('legend').innerHTML=`<span class="muted">映射 v${m.ver} · 点击按钮锁定选中区段</span>`;
+  // lock UI in align buttons area? add simple buttons below via anchorPanel conflict area — put into legend
+  const lockable=m.segments.filter(s=>!s.locked&&s.anchor_l&&s.anchor_r).map(s=>`<button data-lock="${s.idx}">锁 ${s.idx}</button>`).join('');
+  if(!al0.locked&&lockable)$('legend').innerHTML+=` <span>${lockable} <button id="lockAll">锁定全部内部段</button></span>`;
+  document.querySelectorAll('button[data-lock]').forEach(b=>b.onclick=async()=>{
+    await api('POST','/api/alignment/lock',{run_id:runID,seg_idxs:[+b.dataset.lock]});toast('区段已锁定：调整其它锚点不影响它');S.state=null;await refresh();
+  });
+  const la=$('lockAll');if(la)la.onclick=async()=>{
+    const idxs=m.segments.filter(s=>!s.locked&&s.anchor_l&&s.anchor_r).map(s=>s.idx);
+    await api('POST','/api/alignment/lock',{run_id:runID,seg_idxs:idxs});toast('内部区段全部锁定');await refresh();
+  };
+
+}
+
+async function drawResidualsTab(){
+  const svg=$('chart');
+  const al=S.state.alignment;const rid=S.selRun;
+  if(rid===al.ref_run_id){svg.innerHTML='';$('legend').innerHTML='<span class="muted">参考运行无残差</span>';return;}
+  if(!S.residuals[rid]){try{S.residuals[rid]=(await api('GET',`/api/runs/${rid}/residuals`)).residuals;}catch(e){svg.innerHTML=`<text x="${W/2}" y="${H/2}" fill="#ffb454" text-anchor="middle">尚未建立映射</text>`;return;}}
+  const res=S.residuals[rid];
+  let h=`<text x="${M.l}" y="16" font-size="11" fill="#8b9bad">锚点残差：shift=t*−t（真实漂移保留）；右列为相邻分段 chord 偏离</text>`;
+  let y=34;
+  h+=`<text x="${M.l}" y="${y}" font-size="10" fill="#8b9bad">锚点</text><text x="${M.l+120}" y="${y}" font-size="10" fill="#8b9bad">shift</text><text x="${M.l+220}" y="${y}" font-size="10" fill="#8b9bad">chord MAE</text><text x="${M.l+340}" y="${y}" font-size="10" fill="#8b9bad">chord max</text>`;
+  y+=16;
+  for(const r of res){
+    h+=`<text x="${M.l}" y="${y}" font-size="10" fill="#e6edf3">${anchorLabel(r.anchor_id)}</text>
+        <text x="${M.l+120}" y="${y}" font-size="10" fill="${Math.abs(r.shift)>0.02?'#ffb454':'#5dd39e'}">${fmt(r.shift,4)}</text>
+        <text x="${M.l+220}" y="${y}" font-size="10" fill="#8b9bad">${fmt(r.chord_mae,4)}</text>
+        <text x="${M.l+340}" y="${y}" font-size="10" fill="#8b9bad">${fmt(r.chord_max,4)}</text>`;
+    y+=16;
+  }
+  svg.innerHTML=h;
+  $('legend').innerHTML='<span class="muted">残差不为零表示 warping 没有把真实漂移抹平</span>';
+}
+
+function drawFamilies(svg){
+  const al=S.state.alignment;
+  const fs=S.state.families;
+  if(!fs){$('chart').innerHTML=`<text x="${W/2}" y="${H/2}" fill="#8b9bad" text-anchor="middle">尚未构建峰族</text>`;$('legend').innerHTML='';return;}
+  let uMin=Infinity,uMax=-Infinity;
+  for(const f of fs.families)for(const m of f.members){uMin=Math.min(uMin,m.apex_u);uMax=Math.max(uMax,m.apex_u);}
+  const runs=S.state.runs;
+  const xs=xScale(uMin-0.3,uMax+0.3);
+  const rowY=i=>M.t+20+i*((PH-30)/Math.max(runs.length-1,1));
+  let h=`<text x="${M.l}" y="14" font-size="10" fill="#8b9bad">参考时间轴上的峰族（同一颜色为一族；空缺=该运行缺失）</text>`;
+  runs.forEach((r,i)=>{
+    const y=rowY(i);
+    h+=`<line x1="${M.l}" x2="${W-M.r}" y1="${y}" y2="${y}" stroke="#222c39"/>
+        <text x="${M.l-6}" y="${y+3}" font-size="9" fill="#8b9bad" text-anchor="end">${r.run.name.slice(0,8)}</text>`;
+  });
+  fs.families.forEach((f,fi)=>{
+    const col=S.colors[fi%S.colors.length];
+    for(const m of f.members){
+      const ri=runs.findIndex(r=>r.run.id===m.run_id);const y=rowY(ri);
+      h+=`<circle cx="${xs(m.apex_u)}" cy="${y}" r="5" fill="${col}" stroke="#0f141b"><title>${f.name} ${runName(m.run_id)} u=${fmt(m.apex_u)} area=${fmt(m.area)}</title></circle>`;
+    }
+    h+=`<text x="${xs(f.center_u)}" y="${M.t+4}" font-size="9" fill="${col}" text-anchor="middle">${f.name}</text>`;
+  });
+  $('chart').innerHTML=h;
+  $('legend').innerHTML=fs.families.map((f,i)=>`<span><i style="background:${S.colors[i%S.colors.length]}"></i>${f.name}@${fmt(f.center_u)} (${f.members.length}运行)</span>`).join('');
+}
+
+async function drawVersions(svg){
+  const rid=S.selRun;
+  let hist;try{hist=(await api('GET',`/api/runs/${rid}/history`)).versions;}catch(e){hist=[];}
+  const al=S.state.alignment;let maps=[];
+  if(al){try{maps=(await api('GET',`/api/runs/${rid}/maps`)).versions||[];}catch(e){}}
+  let h=`<text x="${M.l}" y="24" font-size="11" fill="#5db0ff">峰工作版本（${runName(rid)}）</text>`;
+  let y=44;
+  h+=`<text x="${M.l}" y="${y}" font-size="10" fill="#8b9bad">基线: 检测 v${(S.state.runs.find(r=>r.run.id===rid)||{}).det_ver||0}</text>`;y+=18;
+  for(const v of hist){
+    const e=v.event;
+    h+=`<text x="${M.l}" y="${y}" font-size="10" fill="#e6edf3">v${v.ver} · ${e.op==='undo'?'撤销 v'+v.undone_of_ver:e.op+' ['+(e.peak_ids||[]).map(x=>x.slice(0,5)).join(',')+']'} · 峰${(v.items||[]).filter(x=>x.status==='active').length}</text>`;
+    y+=16;
+  }
+  y+=12;
+  h+=`<text x="${M.l}" y="${y}" font-size="11" fill="#5dd39e">映射版本</text>`;y+=18;
+  for(const m of maps){
+    h+=`<text x="${M.l}" y="${y}" font-size="10" fill="#e6edf3">map v${m.ver} · plan ${m.plan_rev} · ${m.segments.length}段 · ${m.segments.filter(s=>s.locked).length}锁定 · anchorhash ${(m.anchors_hash||'').slice(0,8)} ${m.frozen?'🧊':''}</text>`;
+    y+=16;
+  }
+  svg.innerHTML=h;
+  $('legend').innerHTML='<span class="muted">所有版本追加保存；冻结后不可变，重启后仍可读取</span>';
+}
+/* ---------- right column: families & consensus ---------- */
+function renderRight(){
+  const el=$('rightCol');const al=S.state.alignment;
+  let h='';
+  if(!al){el.innerHTML='<div class="card"><h3>峰族 / 共识</h3><div class="muted">建立对齐后可用</div></div>';return;}
+  const fs=S.state.families,c=S.state.consensus;
+  h+=`<div class="card"><h3>峰族（${fs?fs.families.length:0}）</h3>
+    <div class="row">容差(参考时间) <input id="famTol" type="number" step="any" value="${fs?fmt(fs.tol_u,3):'0.15'}" style="width:70px">
+    <button class="primary" id="btnFamBuild">${fs?'重建峰族':'构建峰族'}</button>
+    ${fs&&!fs.frozen?`<button id="btnFamFreeze">冻结族版本</button>`:''}
+    ${fs&&fs.frozen?'<span class="tag frozen">v'+fs.ver+' 已冻结</span>':fs?('<span class="tag">v'+fs.ver+' 草案 rev'+fs.rev+'</span>'):''}</div>
+    <div id="famBox" class="scroll"></div></div>`;
+  h+=`<div class="card"><h3>批次共识</h3>
+    <div class="row">面积归一化
+      <select id="normMethod"><option value="tic">总离子流(TIC)</option><option value="median_peak">峰面积中位数</option><option value="none">不归一化</option></select>
+      <button class="primary" id="btnConsBuild">${c&&c.draft?'更新共识草案':'生成共识草案'}</button>
+      ${c&&!c.frozen?'<button id="btnConsFreeze">冻结共识</button>':''}
+      ${c&&c.frozen?'<span class="tag frozen">v'+c.ver+' 已冻结</span>':''}
+    </div>
+    ${c?`<div class="muted">规则固定于版本: ${c.rule.method} × ${fmt(c.rule.scale,3)}</div><div id="consBox" class="scroll"></div>`:''}
+    </div>`;
+  h+=`<div class="card"><h3>血缘</h3><div id="lineage" class="mono muted" style="font-size:10.5px"></div></div>`;
+  el.innerHTML=h;
+  $('btnFamBuild').onclick=async()=>{
+    const tol=+$('famTol').value;
+    try{await api('POST','/api/families/build',{tol_u:tol,expect_rev:fs?fs.rev:0});toast('峰族已聚类（单连接）');await refresh();}catch(e){toast(e.message,true);}
+  };
+  if($('btnFamFreeze'))$('btnFamFreeze').onclick=async()=>{await api('POST','/api/families/freeze',{});toast('峰族版本已冻结');await refresh();};
+  $('btnConsBuild').onclick=async()=>{
+    const method=$('normMethod').value;
+    try{await api('POST','/api/consensus/build',{rule:{method:method,scale:1,note:'fixed@v'+(c?c.ver+1:1)},expect_rev:c?c.rev:0});toast('共识草案已生成/更新（规则写入版本）');await refresh();}catch(e){toast(e.message,true);}
+  };
+  if($('btnConsFreeze'))$('btnConsFreeze').onclick=async()=>{await api('POST','/api/consensus/freeze',{});toast('共识已冻结');await refresh();};
+  if(fs)renderFamBox(fs);
+  if(c)renderConsBox(c);
+  renderLineage();
+}
+
+function renderFamBox(fs){
+  const box=$('famBox');
+  let h='<table><thead><tr><th></th><th>族</th><th>u</th><th>支持</th><th>缺失</th><th></th></tr></thead><tbody>';
+  fs.families.forEach((f,i)=>{
+    const runs=[...new Set(f.members.map(m=>m.run_id))];
+    const all=S.state.runs.map(r=>r.run.id);
+    const miss=all.filter(id=>!runs.includes(id));
+    const col=S.colors[i%S.colors.length];
+    h+=`<tr><td><input type="checkbox" data-fid="${f.id}" ${S.famSel.includes(f.id)?'checked':''}></td>
+      <td><span class="dot" style="background:${col}"></span>${f.name}</td><td class="mono">${fmt(f.center_u)}</td>
+      <td>${runs.map(runName).join(',')}</td><td class="warntxt">${miss.map(runName).join(',')||'-'}</td>
+      <td><details><summary class="muted">成员</summary><div class="mono" style="font-size:10px">
+      ${f.members.map(m=>`${runName(m.run_id)} u=${fmt(m.apex_u)} a=${fmt(m.area)} det${m.det_ver}/edit${m.edit_ver}
+        <button data-ign="${f.id}|${m.run_id}|${m.peak_id}">忽略</button>`).join('<br>')}</div></details></td></tr>`;
+  });
+  h+='</tbody></table>';
+  if(!fs.frozen)h+=`<div class="row"><button id="btnFamMerge" class="primary">合并勾选族</button></div>`;
+  box.innerHTML=h;
+  box.querySelectorAll('input[data-fid]').forEach(cb=>cb.onchange=()=>{
+    const id=cb.dataset.fid;
+    if(cb.checked)S.famSel.push(id);else S.famSel=S.famSel.filter(x=>x!==id);
+  });
+  const mb=$('btnFamMerge');if(mb)mb.onclick=async()=>{
+    if(S.famSel.length<2)return toast('勾选至少两个族',true);
+    try{await api('POST','/api/families/merge',{family_ids:S.famSel,expect_rev:fs.rev});S.famSel=[];toast('族已合并（草案 rev+1）');await refresh();}catch(e){toast(e.message,true);}
+  };
+  box.querySelectorAll('button[data-ign]').forEach(b=>b.onclick=async()=>{
+    const [fid,rid,pid]=b.dataset.ign.split('|');
+    try{await api('POST','/api/families/ignore-member',{family_id:fid,run_id:rid,peak_id:pid,expect_rev:fs.rev});toast('成员已从族中忽略');await refresh();}catch(e){toast(e.message,true);}
+  });
+}
+
+function renderConsBox(c){
+  const box=$('consBox');
+  let h='<table><thead><tr><th>峰</th><th>u</th><th>均面积(归一)</th><th>CV</th><th>支持</th><th>缺失</th></tr></thead><tbody>';
+  for(const p of c.peaks){
+    h+=`<tr><td>${p.name}</td><td class="mono">${fmt(p.center_u)}</td><td>${fmt(p.area_mean)}</td><td>${fmt(p.area_cv)}</td>
+      <td class="oktxt">${p.supporting.map(runName).join(',')}</td><td class="warntxt">${p.missing.map(runName).join(',')||'-'}</td></tr>`;
+  }
+  h+='</tbody></table>';
+  box.innerHTML=h;
+}
+
+function renderLineage(){
+  const box=$('lineage');
+  const rs=S.state.runs.find(r=>r.run.id===S.selRun);
+  if(!rs){box.textContent='';return;}
+  const lines=[`run ${rs.run.name}`,
+    `└─ raw blob ${rs.run.times_blob.slice(0,18)}… / ${rs.run.signal_blob.slice(0,18)}…`,
+    `   digest sha256:${rs.run.raw_digest.slice(0,20)}…`,
+    `└─ detection v${rs.det_ver} (smooth=${rs.det_params?rs.det_params.smooth_window:'-'},prom=${rs.det_params?rs.det_params.min_prominence:'-'})`,
+    `   └─ working peaks = ${rs.items.length} (edit count ${rs.edit_count})`];
+  const al=S.state.alignment;
+  const maps=al?(S.state.maps[S.selRun]||[]):[];
+  for(const m of maps){
+    lines.push(`└─ map v${m.ver} anchorsHash ${(m.segments.length?'…':'')} plan=${m.plan_rev} ${m.frozen?'FROZEN':''}`);
+    lines.push(`   ├─ ${m.segments.length} segments, ${m.segments.filter(s=>s.locked).length} locked`);
+  }
+  if(S.aligned[S.selRun]){
+    const a=S.aligned[S.selRun].rec;
+    lines.push(`   └─ aligned ${a.id.slice(0,8)} n=${a.n_points}`);
+    lines.push(`      ├─ src digest ${a.source_digest.slice(0,18)}…  (与 raw 一致)`);
+    lines.push(`      └─ map hash ${a.map_anchors_hash}`);
+  }
+  box.innerHTML=lines.join('<br>');
+}
+
+/* ---------- import dialog ---------- */
+function initDialog(){
+  const dlg=$('dlgImport');
+  $('btnImport').onclick=()=>dlg.showModal();
+  $('imCancel').onclick=()=>dlg.close();
+  $('imMode').onchange=e=>{
+    $('imUniform').style.display=e.target.value==='uniform'?'':'none';
+    $('imCsv').style.display=e.target.value==='csv'?'':'none';
+  };
+  $('imOk').onclick=async()=>{
+    const name=$('imName').value||'运行';
+    let times=[],signal=[];
+    if($('imMode').value==='csv'){
+      const lines=$('imText').value.trim().split(/\r?\n/).filter(l=>l.trim());
+      let start=lines[0].match(/^[a-zA-Z]/)?1:0;
+      for(let i=start;i<lines.length;i++){
+        const [t,y]=lines[i].split(/[,\s]+/).map(Number);
+        if(Number.isFinite(t)&&Number.isFinite(y)){times.push(t);signal.push(y);}
+      }
+    }else{
+      const t0=+$('imT0').value,dt=+$('imDt').value,n=+$('imN').value;
+      const drift=+$('imDrift').value,plat=$('imPlateau').checked;
+      for(let i=0;i<n;i++){
+        const x=t0+dt*i;times.push(x);
+        let y=0.02+3*Math.exp(-(((drift*x-3)/0.18)**2))+3*Math.exp(-(((drift*x-14)/0.2)**2))+3*Math.exp(-(((drift*x-20)/0.24)**2));
+        if(plat){
+          const m=drift*x;y+=m>=7.9&&m<=8.1?2.6:2.6*Math.exp(-(((m-(m<7.9?7.9:8.1))/0.22)**2));
+        }
+        signal.push(y);
+      }
+    }
+    if(times.length<5)return toast('至少 5 个点',true);
+    const meta={sample_id:$('imSample').value,sample_name:name,instr_id:$('imInstr').value,instr_model:'manual',column:$('imCol').value,operator:'ui'};
+    try{const r=await api('POST','/api/runs',{name,times,signal,meta});toast('已导入 '+r.id.slice(0,8));dlg.close();await refresh();}
+    catch(e){toast(e.message,true);}
+  };
+}
+
+/* ---------- boot ---------- */
+function render(){renderLeft();renderMid();renderRight();}
+$('btnRefresh').onclick=()=>{S.series={};S.aligned={};S.residuals={};S.suggestions={};refresh();};
+$('btnSeed').onclick=async()=>{
+  try{await api('POST','/api/demo/seed',{});toast('演示数据已载入并自动检测/建议锚点');S.series={};await refresh();}
+  catch(e){toast(e.message||'已经有数据',true);}
+};
+initDialog();
+refresh().catch(e=>toast(e.message,true));
+</script>
+</body>
+</html>
