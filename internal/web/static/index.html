@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>峰谷罗盘</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>峰谷罗盘</h1>
+  <div class="hint">原始曲线从不改写 · 单调映射 · 每个派生点可追溯到采样点与映射版本</div>
+  <div class="top-actions">
+    <button id="btnSeed" class="ghost">重置/载入演示数据</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="sidebar">
+    <h2>运行</h2>
+    <div id="runList" class="run-list"></div>
+    <div class="ref-pick">
+      <label>参考运行</label>
+      <select id="refSelect"></select>
+    </div>
+    <div class="import-box">
+      <h3>导入运行</h3>
+      <input id="impName" placeholder="名称">
+      <input id="impSample" placeholder="样本 (如 S-9)">
+      <input id="impInstr" placeholder="仪器 (如 HPLC-C)">
+      <input id="impBatch" placeholder="批次 (默认 B1)" value="B1">
+      <textarea id="impData" rows="4" placeholder="每行 time,signal&#10;0.0,1.0&#10;0.1,1.2"></textarea>
+      <button id="btnImport">导入</button>
+      <div id="impMsg" class="msg"></div>
+    </div>
+  </aside>
+
+  <section class="content">
+    <nav class="tabs">
+      <button data-tab="align" class="tab active">原始 / 对齐叠加</button>
+      <button data-tab="peaks" class="tab">候选峰 &amp; 人工操作</button>
+      <button data-tab="map" class="tab">锚点 / 映射 / 残差</button>
+      <button data-tab="families" class="tab">峰族共识</button>
+      <button data-tab="versions" class="tab">版本比较</button>
+    </nav>
+
+    <div id="tab-align" class="tabpane active">
+      <div class="toolbar">
+        <span id="alignTitle" class="pane-title"></span>
+        <label class="ck"><input type="checkbox" id="showRaw" checked> 原始目标曲线</label>
+        <label class="ck"><input type="checkbox" id="showAligned" checked> 对齐曲线</label>
+        <label class="ck"><input type="checkbox" id="showRef" checked> 参考曲线</label>
+      </div>
+      <canvas id="overlayCanvas" height="360"></canvas>
+      <div id="alignMeta" class="meta-line"></div>
+    </div>
+
+    <div id="tab-peaks" class="tabpane">
+      <div class="toolbar split-toolbar">
+        <div>
+          <button id="btnRedetect">用当前参数重新检测</button>
+          <span class="muted">重新检测会迁移稳定峰 ID（不依赖数组下标）</span>
+        </div>
+        <div class="det-params">
+          <label>噪声 <input type="number" id="pNoise" step="0.1" value="1.0" style="width:70px"></label>
+          <label>prominence <input type="number" id="pProm" step="0.1" value="0.8" style="width:70px"></label>
+          <label>最小间距(点) <input type="number" id="pDist" step="1" value="3" style="width:60px"></label>
+        </div>
+      </div>
+      <canvas id="peakCanvas" height="300"></canvas>
+      <div id="migInfo" class="msg"></div>
+      <table id="peakTable" class="grid">
+        <thead><tr>
+          <th>峰ID</th><th>峰位时间</th><th>高度</th><th>面积</th><th>prominence</th>
+          <th>形状</th><th>状态</th><th>并列</th><th>操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar">
+        <button id="btnMerge">合并选中</button>
+        <button id="btnSplit">拆分平顶 (boundary idx)</button>
+        <input id="splitIdx" type="number" placeholder="boundary sample idx" style="width:150px">
+        <button id="btnIgnore">忽略选中</button>
+        <button id="btnRestore">恢复忽略</button>
+        <button id="btnUndo">撤销到上一版</button>
+        <button id="btnFreezePS">冻结当前峰集</button>
+        <span id="psVer" class="ver-tag"></span>
+      </div>
+    </div>
+
+    <div id="tab-map" class="tabpane">
+      <div class="toolbar">
+        <span class="pane-title">目标：</span>
+        <select id="mapTarget"></select>
+        <button id="btnSuggest">自动建议锚点</button>
+        <button id="btnValidate">校验</button>
+        <button id="btnSaveMap">保存映射</button>
+        <button id="btnFreezeMap">冻结映射</button>
+        <button id="btnAddLock">在选中区间加锁</button>
+        <span id="mapVer" class="ver-tag"></span>
+      </div>
+      <div class="canvas-stack">
+        <div class="canvas-block">
+          <div class="canvas-label">拖动锚点（横轴=参考时间，纵轴=目标时间）；灰色虚线为恒等线</div>
+          <canvas id="mapCanvas" height="280"></canvas>
+        </div>
+        <div class="canvas-block">
+          <div class="canvas-label">局部残差（对齐信号 − 参考信号）；点击锚点后仅影响相邻两个区段</div>
+          <canvas id="residCanvas" height="160"></canvas>
+        </div>
+      </div>
+      <div id="mapMsg" class="msg"></div>
+      <div id="suggestBox" class="suggest"></div>
+      <table id="anchorTable" class="grid">
+        <thead><tr><th>锚点ID</th><th>x(参考)</th><th>y(目标)</th><th>来源</th><th>峰</th><th>删除</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar">
+        <span class="muted">手动加锚点：</span>
+        <input id="newX" type="number" step="0.1" placeholder="x 参考时间" style="width:110px">
+        <input id="newY" type="number" step="0.1" placeholder="y 目标时间" style="width:110px">
+        <button id="btnAddAnchor">添加</button>
+      </div>
+    </div>
+
+    <div id="tab-families" class="tabpane">
+      <div class="toolbar">
+        <label>归一化规则（固定进版本）
+          <select id="normRule">
+            <option value="total_area">总峰面积归一化</option>
+            <option value="median">中位峰面积归一化</option>
+            <option value="none">原始面积</option>
+          </select>
+        </label>
+        <label>聚类时间窗 <input type="number" id="tol" value="0.4" step="0.05" style="width:70px"></label>
+        <button id="btnBuildCons">构建批次共识</button>
+        <button id="btnFreezeCons">冻结共识</button>
+        <span id="consVer" class="ver-tag"></span>
+      </div>
+      <div id="familiesBox"></div>
+    </div>
+
+    <div id="tab-versions" class="tabpane">
+      <div class="toolbar">
+        <h3>峰集版本</h3>
+        <h3>映射版本</h3>
+      </div>
+      <div class="version-cols">
+        <div><table id="psVerTable" class="grid"><thead><tr><th>版本</th><th>冻结</th><th>备注</th></tr></thead><tbody></tbody></table></div>
+        <div><table id="mapVerTable" class="grid"><thead><tr><th>版本</th><th>锚点</th><th>拒绝</th><th>冻结</th></tr></thead><tbody></tbody></table></div>
+        <div><h3>共识版本</h3><table id="consVerTable" class="grid"><thead><tr><th>版本</th><th>归一化</th><th>峰族</th><th>冻结</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="diffBox" class="diff-box"></div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
